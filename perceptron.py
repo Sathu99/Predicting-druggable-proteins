@@ -15,7 +15,7 @@ from sklearn.svm import SVC
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier
 
-from sklearn.metrics import roc_auc_score
+import sklearn.metrics as skmet
 
 from sklearn.preprocessing import MinMaxScaler
 
@@ -129,7 +129,7 @@ def cv(clf, X, y, nr_fold):
             MCC = 0
         else:
             MCC = ((TP * TN) - (FP * FN)) / det
-        AUC = roc_auc_score(test_y, pr)
+        AUC = skmet.roc_auc_score(test_y, pr)
         allACC.append(ACC)
         allSENS.append(SENS)
         allSPEC.append(SPEC)
@@ -183,9 +183,11 @@ def testWithSingleFeature(clf, df, feature):
     else:
         MCC = ((TP * TN) - (FP * FN)) / det
 
-    AUC = roc_auc_score(test_y, pr)
+    AUC = skmet.roc_auc_score(test_y, pr)
+    F1 = skmet.f1_score(test_y, p)
+    PRECISION = skmet.precision_score(test_y, p)
 
-    return ACC, SENS, SPEC, MCC, AUC
+    return ACC, SENS, SPEC, MCC, AUC, F1, PRECISION
 
 # Read the Each FASTA Files
 fs_tr_neg, fs_tr_pos, fs_ts_neg, fs_ts_pos = [read_fasta(file) for file in fileNames]
@@ -211,12 +213,10 @@ for feature in tqdm(featureNames):
 
 df_cv_score = pd.DataFrame(cv_scores, columns=["ACC", "SENS", "SPEC", "MCC", "AUC", "MODEL-FEATURE"])
 
-df_final_scores = pd.DataFrame()
+df_final_cv_scores = pd.DataFrame()
 for feature in featureNames:
     df = df_cv_score[[val.endswith(f'_{feature}') for val in df_cv_score["MODEL-FEATURE"].values]].sort_values(["MCC"], ascending=False).head(1)
-    df_final_scores = pd.concat([df_final_scores, df], axis=0, ignore_index=True)
-
-print(df_final_scores)
+    df_final_cv_scores = pd.concat([df_final_cv_scores, df], axis=0, ignore_index=True)
 
 # Hyperparameter tuning
 import optuna
@@ -224,6 +224,7 @@ from optuna import Trial
 from optuna.samplers import TPESampler
 from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import StratifiedKFold
+import joblib
 
 kfolds = StratifiedKFold(n_splits=10, shuffle=True, random_state=RANDOM_SEED)
 
@@ -329,56 +330,78 @@ def tune(objective):
     
     return params
 
-# Get best params the Each Models
-ht_cv_scores = {}
-for model_feature in tqdm(df_final_scores["MODEL-FEATURE"].values):
-    clf, feature = model_feature.split('_')
+# Train the Each Models with default parameters
+test_scores_0 = []
 
-    X_train = df_train_scaled.drop("TARGET", axis=1)[[col for col in df_train_scaled.columns if col.startswith(feature)]]
-    y_train = df_train_scaled["TARGET"]
-    
-    if(clf == "RF"):
-        # Wrap the objective inside a lambda and call objective inside it
-        func = lambda trial: RF_objective(trial, X_train, y_train)
-    elif(clf == "SVC"):
-        func = lambda trial: SVC_objective(trial, X_train, y_train)
-    elif(clf == "LR"):
-        func = lambda trial: LR_objective(trial, X_train, y_train)
-    else:
-        func = lambda trial: ET_objective(trial, X_train, y_train)
-
-    params = tune(func)
-    ht_cv_scores[f"{clf}_{feature}"] = params
-
-print("Hyperparameters : ", ht_cv_scores)
-
-# Train the Each Models with optimized parameters
-test_scores = []
-base_leaners = []
-
-for model_feature in tqdm(df_final_scores["MODEL-FEATURE"].values):
+for model_feature in tqdm(df_final_cv_scores["MODEL-FEATURE"].values):
     clf, feature = model_feature.split('_')
 
     X_train = df_train_scaled.drop("TARGET", axis=1)[[col for col in df_train_scaled.columns if col.startswith(feature)]]
     y_train = df_train_scaled["TARGET"]
 
+    RF_clf, SVM_clf, LR_reg, ET_clf = initializeModels()
+
     if(clf == "RF"):
-        model = RandomForestClassifier(**ht_cv_scores[model_feature], random_state=RANDOM_SEED)
+        model = RF_clf
     elif(clf == "SVC"):
-        model = SVC(**ht_cv_scores[model_feature], random_state=RANDOM_SEED, probability=True)
+        model = SVM_clf
     elif(clf == "LR"):
-        model = LogisticRegression(**ht_cv_scores[model_feature], random_state=RANDOM_SEED)
+        model = LR_reg
     else:
-        model = ExtraTreesClassifier(**ht_cv_scores[model_feature], random_state=RANDOM_SEED)
+        model = ET_clf
 
     model.fit(X_train, y_train)
-    base_leaners.append((model_feature, model))
 
     score = list(testWithSingleFeature(model, df_test_scaled, feature))
     score.append(model_feature)
-    test_scores.append(score)
+    test_scores_0.append(score)
 
-df_test_score = pd.DataFrame(test_scores, columns=["ACC", "SENS", "SPEC", "MCC", "AUC", "MODEL_FEATURE"])
+df_test_score_0 = pd.DataFrame(test_scores_0, columns=["ACC", "SENS", "SPEC", "MCC", "AUC", "F1", "PRECISION", "MODEL_FEATURE"])
+
+print(df_test_score_0)
+
+# ============================================================================================================================
+
+# Get best params the Each Models
+# ht_cv_scores = {}
+# for model_feature in tqdm(df_final_cv_scores["MODEL-FEATURE"].values):
+#     clf, feature = model_feature.split('_')
+
+#     X_train = df_train_scaled.drop("TARGET", axis=1)[[col for col in df_train_scaled.columns if col.startswith(feature)]]
+#     y_train = df_train_scaled["TARGET"]
+    
+#     if(clf == "RF"):
+#         # Wrap the objective inside a lambda and call objective inside it
+#         func = lambda trial: RF_objective(trial, X_train, y_train)
+#     elif(clf == "SVC"):
+#         func = lambda trial: SVC_objective(trial, X_train, y_train)
+#     elif(clf == "LR"):
+#         func = lambda trial: LR_objective(trial, X_train, y_train)
+#     else:
+#         func = lambda trial: ET_objective(trial, X_train, y_train)
+
+#     params = tune(func)
+#     ht_cv_scores[f"{clf}_{feature}"] = params
+
+# ================================================================================================================================
+
+# Train the Each Models with optimized parameters
+test_scores_1 = []
+base_leaners = joblib.load('./models/baseleaners.h5')
+
+for model_feature, model in tqdm(base_leaners):
+    _, feature = model_feature.split('_')
+
+    X_train = df_train_scaled.drop("TARGET", axis=1)[[col for col in df_train_scaled.columns if col.startswith(feature)]]
+    y_train = df_train_scaled["TARGET"]
+
+    score = list(testWithSingleFeature(model, df_test_scaled, feature))
+    score.append(model_feature)
+    test_scores_1.append(score)
+
+df_test_score_1 = pd.DataFrame(test_scores_1, columns=["ACC", "SENS", "SPEC", "MCC", "AUC", "F1", "PRECISION", "MODEL_FEATURE"])
+
+print(df_test_score_1)
 
 def get_all_predictions(X: pd.DataFrame):
 
@@ -408,13 +431,7 @@ scaler_final = MinMaxScaler()
 
 train_allPr_scl = scaler_final.fit_transform(train_allPr)
 
-final_est = lambda trial: SVC_objective(trial, train_allPr_scl, y_train)
-
-meta_params = tune(final_est)
-
-meta_leaner = SVC(**meta_params, random_state=RANDOM_SEED, probability=True)
-
-meta_leaner.fit(train_allPr, y_train)
+meta_leaner = joblib.load('./models/metaleaners.h5')
 
 X_test = df_test_scaled.drop("TARGET", axis=1)
 y_test = df_test_scaled["TARGET"]
@@ -424,46 +441,23 @@ test_allPr = get_all_predictions(X_test)
 test_allPr_scl = scaler_final.transform(test_allPr)
 
 p_label = meta_leaner.predict(test_allPr_scl)
-p_prob = meta_leaner.predict_proba(test_allPr_scl)[:, 0]
 
-import sklearn.metrics as skmet
-import itertools
-import numpy as np
 import matplotlib.pyplot as plt
 
-cm = skmet.confusion_matrix(y_true=y_test.values, y_pred=p_label)
+tn, fp, fn, tp = skmet.confusion_matrix(y_true=y_test.values, y_pred=p_label).ravel()
 
-def plot_confusion_matrix(cm, classes, normalize=False, title="Confusion matrix", cmap=plt.cm.Blues):
- """
- This function prints and plots the confusion matrix.
- Normalization can be applied by setting `normalize=True`.
- """
- plt.imshow(cm, interpolation='nearest', cmap=cmap)
- plt.title(title)
- plt.colorbar()
- tick_marks = np.arange(len(classes))
- plt.xticks(tick_marks, classes, rotation=45)
- plt.yticks(tick_marks, classes)
+test_final_scores = [[
+    skmet.accuracy_score(y_true=y_test, y_pred=p_label),
+    (tp /  (tp+fn)),
+    (tn / (tn+fp)),
+    skmet.matthews_corrcoef(y_true=y_test, y_pred=p_label),
+    skmet.roc_auc_score(y_test, p_label),
+    skmet.f1_score(y_true=y_test, y_pred=p_label),
+    skmet.precision_score(y_true=y_test, y_pred=p_label)
+]]
 
-thresh = cm.max() / 2.
-for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
- plt.text(j, i, cm[i, j],
- horizontalalignment="center",
- color="white" if cm[i, j] > thresh else "black")
-
-tn, fp, fn, tp = cm.ravel()
-
-print("Precision :", skmet.precision_score(y_true=y_test, y_pred=p_label))
-print("F1 measure :", skmet.f1_score(y_true=y_test, y_pred=p_label))
-print("Accuracy :", skmet.accuracy_score(y_true=y_test, y_pred=p_label))
-print("sensitivity :", (tp /  (tp+fn)))
-print("specificity :", (tn / (tn+fp)))
-
-plt.tight_layout()
-plt.ylabel('True label')
-plt.xlabel('Predicted label')
-cm_plot_labels = ['0','1']
-plot_confusion_matrix(cm=cm, classes=cm_plot_labels, title='Confusion Matrix')
+df_test_final_score = pd.DataFrame(test_final_scores, columns=["ACC", "SENS", "SPEC", "MCC", "AUC", "F1", "PRECISION"])
+print(df_test_final_score)
 
 pos_test = df_test_scaled[df_test_scaled["TARGET"] == 1.0]
 neg_test = df_test_scaled[df_test_scaled["TARGET"] == 0.0]
@@ -472,7 +466,7 @@ test_pos_allPr_scl = scaler_final.transform(get_all_predictions(pos_test))
 test_neg_allPr_scl = scaler_final.transform(get_all_predictions(neg_test))
 
 pos_p_label = meta_leaner.predict(test_pos_allPr_scl)
-pos_p_prob = meta_leaner.predict_proba(test_pos_allPr_scl)[:, 0]
+pos_p_prob = meta_leaner.predict_proba(test_pos_allPr_scl)[:, 1]
 neg_p_label = meta_leaner.predict(test_neg_allPr_scl)
 neg_p_prob = meta_leaner.predict_proba(test_neg_allPr_scl)[:, 0]
 
