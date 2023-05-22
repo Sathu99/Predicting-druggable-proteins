@@ -19,7 +19,6 @@ import sklearn.metrics as skmet
 
 from sklearn.preprocessing import MinMaxScaler
 
-
 def read_fasta(file):
     line1 = open("./data/" + file + ".txt").read().split('>')[1:]
     line2 = [item.split('\n')[0:-1] for item in line1]
@@ -439,8 +438,6 @@ test_allPr = get_all_predictions(X_test)
 test_allPr_scl = scaler_final.transform(test_allPr)
 
 p_label = meta_leaner.predict(test_allPr_scl)
-
-import matplotlib.pyplot as plt
 
 tn, fp, fn, tp = skmet.confusion_matrix(y_true=y_test.values, y_pred=p_label).ravel()
 
