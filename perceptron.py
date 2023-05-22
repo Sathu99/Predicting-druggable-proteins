@@ -98,7 +98,6 @@ def cv(clf, X, y, nr_fold):
     allSPEC = []
     allMCC = []
     allAUC = []
-
     for j in range(0, nr_fold):
         train_ix = ((ix % nr_fold) != j)
         test_ix = ((ix % nr_fold) == j)
@@ -177,7 +176,6 @@ def testWithSingleFeature(clf, df, feature):
     SENS = TP / (TP + FN)
     SPEC = TN / (TN + FP)
     det = math.sqrt((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN))
-
     if (det == 0):
         MCC = 0
     else:

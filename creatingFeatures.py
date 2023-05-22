@@ -737,3 +737,7 @@ class Features:
 
     def Rvalue(self, aa1, aa2, AADict, Matrix):
         return sum([(Matrix[i][AADict[aa1]] - Matrix[i][AADict[aa2]]) ** 2 for i in range(len(Matrix))]) / len(Matrix)
+
+import sys
+n = int(sys.argv[1])
+print(n+1)
