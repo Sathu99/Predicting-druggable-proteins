@@ -648,7 +648,8 @@ class Features:
             name, sequence = i[0], re.sub('-', '', i[1])
             code = []
             for p in property:
-                code = code + self.Count2(group1[p], sequence) + self.Count2(group2[p], sequence) + self.Count2(group3[p], sequence)
+                code = code + self.Count2(group1[p], sequence) + self.Count2(group2[p], sequence) + self.Count2(
+                    group3[p], sequence)
             encodings.append(code)
         return np.array(encodings, dtype=float), header
 
